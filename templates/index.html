@@ -25,18 +25,19 @@
         let isListening = false;
         let pianoInstrument;
         let listeningState = 'OFF';
-        let singingTimer, silenceTimer;
         let tempo, key;
         let chordTimeout;
 
         const notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
         // Audio detection parameters
-        const DETECTION_THRESHOLD = 5;
+        const DETECTION_THRESHOLD = 10;
         const DETECTION_SMOOTHING = 0.8;
         let smoothedVolume = 0;
         let singingStartTime = 0;
         let silenceStartTime = 0;
+        let audioBuffer = [];
+        let isFirstFiveSeconds = true;
 
         startButton.onclick = startListening;
         stopButton.onclick = stopEverything;
@@ -48,13 +49,20 @@
         socket.on('listening_started', (data) => {
             tempo = data.tempo;
             key = data.key;
-            console.log(`Listening started. Tempo: ${tempo}, Key: ${key}`);
+            console.log(`Listening started. Initial Tempo: ${tempo}, Key: ${key}`);
+        });
+
+        socket.on('detection_result', (data) => {
+            tempo = data.tempo;
+            key = data.key;
+            console.log(`Detected BPM: ${tempo}, Key: ${key}`);
+            statusDiv.textContent = `Detected BPM: ${tempo}, Key: ${key}`;
+            isFirstFiveSeconds = false;
         });
 
         socket.on('chord', (data) => {
             console.log('Received chord:', data);
-            const chord = getRomanNumeralChord(data.chord);
-            playChord(chord);
+            playChord(data.chord, data.key);
         });
 
         async function startListening() {
@@ -94,16 +102,26 @@
             const array = new Uint8Array(analyser.frequencyBinCount);
             analyser.getByteFrequencyData(array);
             const average = array.reduce((a, b) => a + b) / array.length;
-
+            
             smoothedVolume = DETECTION_SMOOTHING * smoothedVolume + (1 - DETECTION_SMOOTHING) * average;
-
+            
             const now = Date.now();
             if (smoothedVolume > DETECTION_THRESHOLD) {
                 if (singingStartTime === 0) {
                     singingStartTime = now;
+                    audioBuffer = [];
+                    isFirstFiveSeconds = true;
                 }
                 silenceStartTime = 0;
-
+                
+                // Collect audio data for the first 5 seconds
+                if (isFirstFiveSeconds && audioBuffer.length < 5 * audioContext.sampleRate) {
+                    audioBuffer = audioBuffer.concat(Array.from(event.inputBuffer.getChannelData(0)));
+                    if (audioBuffer.length >= 5 * audioContext.sampleRate) {
+                        socket.emit('audio_data', { audio: new Float32Array(audioBuffer).buffer });
+                    }
+                }
+                
                 if (now - singingStartTime > 5000 && listeningState === 'OFF') {
                     listeningState = 'ON';
                     statusDiv.textContent = "Singing detected. Playing chords.";
@@ -114,7 +132,7 @@
                     silenceStartTime = now;
                 }
                 singingStartTime = 0;
-
+                
                 if (now - silenceStartTime > 5000 && listeningState === 'ON') {
                     listeningState = 'OFF';
                     statusDiv.textContent = "Silence detected. Stopped playing chords.";
@@ -131,7 +149,7 @@
 
         function requestNextChord() {
             if (listeningState === 'ON') {
-                socket.emit('request_chord');
+                socket.emit('request_chord', { melody_note: 'C' });  // Default to C as we're not detecting pitch
                 chordTimeout = setTimeout(requestNextChord, (60 / tempo) * 1000);
             }
         }
@@ -140,9 +158,9 @@
             clearTimeout(chordTimeout);
         }
 
-        function playChord(chord) {
-            console.log("Playing chord:", chord);
-            const notes = getChordNotes(chord);
+        function playChord(chord, key) {
+            console.log(`Playing chord: ${chord} in key ${key}`);
+            const notes = getChordNotes(chord, key);
             const currentTime = audioContext.currentTime;
             const duration = 60 / tempo;
             notes.forEach(note => {
@@ -150,46 +168,20 @@
             });
         }
 
-        function getChordNotes(chord) {
-            const rootNote = chord[0];
-            const isMinor = chord.includes('m');
-            const isDiminished = chord.includes('dim');
-
-            let rootIndex = notes.indexOf(rootNote);
-            let thirdIndex = (rootIndex + (isMinor ? 3 : 4)) % 12;
-            let fifthIndex = (rootIndex + (isDiminished ? 6 : 7)) % 12;
+        function getChordNotes(chord, key) {
+            const romanToSemitones = {'I': 0, 'II': 2, 'III': 4, 'IV': 5, 'V': 7, 'VI': 9, 'VII': 11};
+            const keyIndex = notes.indexOf(key);
+            const chordIndex = (keyIndex + romanToSemitones[chord.toUpperCase()]) % 12;
+            const rootNote = notes[chordIndex];
+            const isMinor = chord.toLowerCase() === chord;
+            const thirdIndex = (chordIndex + (isMinor ? 3 : 4)) % 12;
+            const fifthIndex = (chordIndex + 7) % 12;
 
             return [
-                notes[rootIndex] + '4',
+                notes[chordIndex] + '4',
                 notes[thirdIndex] + '4',
                 notes[fifthIndex] + '4'
             ];
-        }
-
-        function getRomanNumeralChord(numeral) {
-            const scale = getMajorScale(key);
-            const chordTypes = {
-                'I': '',   'II': 'm',  'III': 'm', 'IV': '',
-                'V': '',   'VI': 'm',  'VII': 'dim',
-                'i': 'm',  'ii': 'm',  'iii': 'm', 'iv': 'm',
-                'v': 'm',  'vi': 'm',  'vii': 'dim'
-            };
-
-            const degree = getRomanNumeralValue(numeral) - 1;
-            return scale[degree] + chordTypes[numeral.toUpperCase()];
-        }
-
-        function getMajorScale(key) {
-            const keyIndex = notes.indexOf(key);
-            const majorPattern = [0, 2, 4, 5, 7, 9, 11];
-            return majorPattern.map(interval => notes[(keyIndex + interval) % 12]);
-        }
-
-        function getRomanNumeralValue(numeral) {
-            const values = {
-                'I': 1, 'II': 2, 'III': 3, 'IV': 4, 'V': 5, 'VI': 6, 'VII': 7
-            };
-            return values[numeral.toUpperCase()];
         }
 
         function stopEverything() {
