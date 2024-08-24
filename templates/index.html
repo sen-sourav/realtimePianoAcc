@@ -27,6 +27,7 @@
         let listeningState = 'OFF';
         let tempo, key;
         let chordTimeout;
+	let metronomeInterval;
 
         const notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
@@ -92,11 +93,37 @@
                 statusDiv.textContent = "Listening for singing...";
                 socket.emit('start_listening');
                 console.log('Listening started');
+
+		// Start the metronome
+		startMetronome();
             } catch (error) {
                 console.error('Error starting audio:', error);
                 statusDiv.textContent = "Error starting audio. Please try again.";
             }
         }
+
+        function startMetronome() {
+            if (metronomeInterval) clearInterval(metronomeInterval);
+            playMetronomeClick();
+            metronomeInterval = setInterval(playMetronomeClick, (60 / tempo) * 1000);
+        }
+
+        function playMetronomeClick() {
+            const clickOscillator = audioContext.createOscillator();
+            const clickGain = audioContext.createGain();
+
+            clickOscillator.connect(clickGain);
+            clickGain.connect(audioContext.destination);
+
+            clickOscillator.frequency.value = 1000; // 1000 Hz "click" sound
+            clickGain.gain.setValueAtTime(0, audioContext.currentTime);
+            clickGain.gain.linearRampToValueAtTime(0.3, audioContext.currentTime + 0.001);
+            clickGain.gain.linearRampToValueAtTime(0, audioContext.currentTime + 0.001 + 0.1);
+
+            clickOscillator.start();
+            clickOscillator.stop(audioContext.currentTime + 0.1);
+        }
+
 
         function detectAudio(event) {
             const array = new Uint8Array(analyser.frequencyBinCount);
@@ -190,6 +217,10 @@
                 if (javascriptNode) javascriptNode.onaudioprocess = null;
                 if (microphone) microphone.disconnect();
                 if (analyser) analyser.disconnect();
+                if (metronomeInterval) {
+                    clearInterval(metronomeInterval);
+                    metronomeInterval = null;
+                }
                 audioContext.close().then(() => {
                     audioContext = null;
                     pianoInstrument = null;

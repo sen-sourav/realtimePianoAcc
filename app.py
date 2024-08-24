@@ -8,7 +8,7 @@ socketio = SocketIO(app)
 
 chords = ['I', 'V', 'vi', 'IV']
 key = 'C'  # Default key, will be updated
-tempo = 60
+tempo = 120
 chord_index = 0
 acc_start_flag = False
 tempo_key_flag = False
@@ -53,7 +53,7 @@ def handle_chord_request(data):
     emit('chord', {'chord': current_chord, 'key': key})
 
 def detect_bpm_and_key(audio_data):
-    global key, tempo
+    global key #, tempo
     sr = 22050  # Assume a sample rate of 22050 Hz
 
     # BPM detection
@@ -72,7 +72,7 @@ def detect_bpm_and_key(audio_data):
     #print(tempo_key_flag)
     if not tempo_key_flag:
         #tempo_key_flag = True
-        tempo = detected_tempo
+        #tempo = detected_tempo
         key = detected_key
 
 def get_chord_from_roman(numeral, key):
