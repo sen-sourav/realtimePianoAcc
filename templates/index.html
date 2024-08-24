@@ -29,9 +29,9 @@
         let isListening = false;
         let pianoInstrument;
         let listeningState = 'OFF';
-        let tempo, key;
+        let tempo = 120, key;
         let chordTimeout;
-	let metronomeInterval;
+        let metronomeInterval;
 
         const notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
@@ -55,6 +55,7 @@
             tempo = data.tempo;
             key = data.key;
             console.log(`Listening started. Initial Tempo: ${tempo}, Key: ${key}`);
+            startMetronome();
         });
 
         socket.on('detection_result', (data) => {
@@ -63,6 +64,7 @@
             console.log(`Detected BPM: ${tempo}, Key: ${key}`);
             statusDiv.textContent = `Detected BPM: ${tempo}, Key: ${key}`;
             isFirstFiveSeconds = false;
+            startMetronome(); // Restart metronome with new tempo
         });
 
         socket.on('chord', (data) => {
@@ -97,9 +99,7 @@
                 statusDiv.textContent = "Listening for singing...";
                 socket.emit('start_listening');
                 console.log('Listening started');
-
-		// Start the metronome
-		startMetronome();
+                startMetronome();
             } catch (error) {
                 console.error('Error starting audio:', error);
                 statusDiv.textContent = "Error starting audio. Please try again.";
@@ -128,14 +128,13 @@
             clickOscillator.stop(audioContext.currentTime + 0.1);
         }
 
-
         function detectAudio(event) {
             const array = new Uint8Array(analyser.frequencyBinCount);
             analyser.getByteFrequencyData(array);
             const average = array.reduce((a, b) => a + b) / array.length;
-            
+
             smoothedVolume = DETECTION_SMOOTHING * smoothedVolume + (1 - DETECTION_SMOOTHING) * average;
-            
+
             const now = Date.now();
             if (smoothedVolume > DETECTION_THRESHOLD) {
                 if (singingStartTime === 0) {
@@ -144,7 +143,7 @@
                     isFirstFiveSeconds = true;
                 }
                 silenceStartTime = 0;
-                
+
                 // Collect audio data for the first 5 seconds
                 if (isFirstFiveSeconds && audioBuffer.length < 5 * audioContext.sampleRate) {
                     audioBuffer = audioBuffer.concat(Array.from(event.inputBuffer.getChannelData(0)));
@@ -152,7 +151,7 @@
                         socket.emit('audio_data', { audio: new Float32Array(audioBuffer).buffer });
                     }
                 }
-                
+
                 if (now - singingStartTime > 5000 && listeningState === 'OFF') {
                     listeningState = 'ON';
                     statusDiv.textContent = "Singing detected. Playing chords.";
@@ -163,7 +162,7 @@
                     silenceStartTime = now;
                 }
                 singingStartTime = 0;
-                
+
                 if (now - silenceStartTime > 5000 && listeningState === 'ON') {
                     listeningState = 'OFF';
                     statusDiv.textContent = "Silence detected. Stopped playing chords.";
