@@ -71,7 +71,7 @@ def detect_bpm_and_key(audio_data):
     global tempo_key_flag
     #print(tempo_key_flag)
     if not tempo_key_flag:
-        #tempo_key_flag = True
+        tempo_key_flag = True
         #tempo = detected_tempo
         key = detected_key
 
